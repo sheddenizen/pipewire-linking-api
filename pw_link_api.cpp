@@ -42,11 +42,11 @@ namespace lg {
     public:
         Entry()
             : _g(Globals::Instance())
-            , _use_real(_g.current_level >= _g.level)
+            , _use_real(_g.current_level >= level)
             , _os(_use_real ? _g.get_real(): _g.get_fake())
         {            
-            if (use_real) {
-                _g.mutex.lock()
+            if (_use_real) {
+                _g.mutex.lock();
                 char p[] = { '<','0'+level,'>', prefx... , ':', ' ', 0 };
                 _os << p;
             }
@@ -279,7 +279,7 @@ class PwWrapper {
                         if (link.first == name) {
                             auto it = dst_port_map.find(link.second);
                             if (it != dst_port_map.end()) {
-                                lg::Debug() << "New source port, " << name << " will be linked link to " << link.second;
+                                lg::Info() << "New source port, " << name << " will be linked link to " << link.second;
                                 pending_links.push_back(std::make_tuple(id, it->second, true));
                             }
                         }
@@ -289,7 +289,7 @@ class PwWrapper {
                         if (link.second == name) {
                             auto it = src_port_map.find(link.second);
                             if (it != src_port_map.end()) {
-                                lg::Debug() << "New dest port, " << name << " will be linked to " << link.second;
+                                lg::Info() << "New dest port, " << name << " will be linked to " << link.second;
                                 pending_links.push_back(std::make_tuple(it->second, id, true));
                             }
                         }
@@ -328,7 +328,7 @@ class PwWrapper {
                 link_map[key] = id;
                 auto it = desired_links.find(std::make_pair(port_name(key.first), port_name(key.second)));
                 if (it != desired_links.end()) {
-                    lg::Debug() << "Removed link from " << it->first << " to " << it->second << " is desired, reinstating";
+                    lg::Info() << "Removed link from " << it->first << " to " << it->second << " is desired, reinstating";
                     pending_links.push_back(std::make_tuple(key.first, key.second, true));
                     if (!busy) {
                         lg::Debug() << "Triggering processing";
@@ -343,14 +343,13 @@ class PwWrapper {
             auto srcit = objects.find(src);
             auto dstit = objects.find(dst);
             if (srcit == objects.end() || dstit == objects.end()) {
-                lg::Debug() << "Unable to link ports " << src << " and " << dst << ", not found";
+                lg::Warn() << "Unable to link ports " << src << " and " << dst << ", not found";
                 return false;
             }
             if (link_proxy) {
-                lg::Debug() << "Cannot make link: link_proxy already allocated! (" << link_proxy << ")";
+                lg::Error() << "Cannot make link: link_proxy already allocated! (" << link_proxy << ")";
                 return false;
             }
-lg::Debug() << "Create properties/Linking ports " << src << " and " << dst;
 
             struct pw_properties *props = pw_properties_new(
                 PW_KEY_LINK_OUTPUT_NODE, srcit->second.at("node.id"),
@@ -361,12 +360,9 @@ lg::Debug() << "Create properties/Linking ports " << src << " and " << dst;
                 NULL);
 
             if (props == 0) {
-                lg::Debug() << "Unable to link ports " << src << " and " << dst << ", unable to create properties";
+                lg::Error() << "Unable to link ports " << src << " and " << dst << ", unable to create properties";
                 return false;
             }
-
-
-lg::Debug() << "Create link proxy/Linking ports " << src << " and " << dst;
 
             //struct pw_proxy *
             link_proxy = (struct pw_proxy*)pw_core_create_object(
@@ -377,12 +373,10 @@ lg::Debug() << "Create link proxy/Linking ports " << src << " and " << dst;
                 &props->dict,
                 0);
 
-lg::Debug() << "link_proxy = " << link_proxy << ". Adding listener/Linking ports " << src << " and " << dst;
+            lg::Debug() << "link_proxy = " << link_proxy << ". Adding listener/Linking ports " << src << " and " << dst;
         
         	pw_proxy_add_listener(link_proxy, &link_proxy_listener, &link_proxy_events, this);
-            lg::Debug() << "Linking ports " << src << " and " << dst;
 
-lg::Debug() << "Send sync";
             pw_proxy_sync(link_proxy, 42);
 
             // Need this?
@@ -418,26 +412,26 @@ lg::Debug() << "Send sync";
         {
             if (link_proxy) {
                 // Hopefully we've just been poked while still processing the last request in which case everything is fine
-                lg::Debug() << "Cannot process pending list: link_proxy not null (" << link_proxy << ") while " << (busy ? "busy" : "not busy");
+                lg::Warn() << "Cannot process pending list: link_proxy not null (" << link_proxy << ") while " << (busy ? "busy" : "not busy");
                 return;
             }
             if (!pending_links.empty()) {
                 auto link = pending_links.front();
                 if (std::get<2>(link)) {
                     if (!make_link_impl(std::get<0>(link), std::get<1>(link))) {
-                        lg::Debug() << "Unable to queue new link request";
+                        lg::Error() << "Unable to queue new link request";
                         // What do? Loop around and pretend nothing happened
                         pw_core_sync(core, PW_ID_CORE, 0);
                     } else {
-                        lg::Debug() << "Queued link request, queue size = " << pending_links.size();
+                        lg::Info() << "Creating link between ports, " << std::get<0>(link) << " and " << std::get<1>(link);
                     }
                 } else {
                     auto linkit = link_map.find(std::make_pair(std::get<0>(link), std::get<1>(link)));
                     if (linkit != link_map.end()) {
-                        lg::Debug() << "Removing link object " << linkit->second << " linking ports " << linkit->first.first << " and " << linkit->first.second;
+                        lg::Info() << "Removing link object " << linkit->second << " linking ports " << linkit->first.first << " and " << linkit->first.second;
                         pw_registry_destroy(registry, linkit->second);
                     } else {
-                        lg::Debug() << "Unable to find link between ports, " << linkit->first.first << " and " << linkit->first.second << ", cannot remove";
+                        lg::Warn() << "Unable to find link between ports, " << linkit->first.first << " and " << linkit->first.second << ", cannot remove";
                     }
                     pw_core_sync(core, PW_ID_CORE, 0);
                 }
@@ -460,20 +454,16 @@ lg::Debug() << "Start loop: PW Wrapper: " << this;
 
             while (!quit) {
                 pw_main_loop_run(loop);
-                lg::Debug() << "Main loop interrupted";
+                lg::Info() << "Main loop interrupted " << (quit ? "due to quit":"but quit not set!");
             }
 
-            lg::Debug() << "PW: cleaning up core listener";
             spa_hook_remove(&core_listener);
-            lg::Debug() << "PW: cleaning up registry";
             pw_proxy_destroy((struct pw_proxy*)registry);
             lg::Debug() << "PW: cleaning up core connection";
             pw_core_disconnect(core);
             lg::Debug() << "PW: cleaning up context";
             pw_context_destroy(context);
-            lg::Debug() << "PW: cleaning up loop";
             pw_main_loop_destroy(loop);
-            lg::Debug() << "PW: de initialising";
             pw_deinit();
             lg::Debug() << "PW: clean up done";
         }
@@ -497,7 +487,7 @@ lg::Debug() << "Start loop: PW Wrapper: " << this;
         }
 
         static void link_proxy_error(void *data, int seq, int res, const char *message) {
-            printf("link proxy error :%s (seq: %d res: %d)\n", message, seq, res);
+            lg::Warn() << "link proxy error : '" << message << "', seq: " << seq << " res: " << res;
         }
 
         static void link_proxy_destroyed(void *data) {
@@ -518,7 +508,7 @@ lg::Debug() << "Start loop: PW Wrapper: " << this;
                     lg::Debug() << "removed link proxy";
                 } else {
                     // Something bad happened
-                    lg::Debug() << "link proxy non-null while not busy!";
+                    lg::Warn() << "link proxy non-null while not busy!";
                 }
             }
             process_pending();
