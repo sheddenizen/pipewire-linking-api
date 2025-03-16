@@ -60,6 +60,7 @@ namespace lg {
         template <typename T>
         std::ostream & operator << (T const & v) { return _os << v; }
         std::ostream & operator << (std::ostream & (fn)( std::ostream & )){ return _os << fn; }
+        operator std::ostream & () { return _os; }
 
     private:
         Globals & _g;
@@ -245,29 +246,29 @@ class PwWrapper {
         std::string port_name(uint32_t obj_id) const { return port_name(objects.at(obj_id)); }
 
         // Dump all properties of an object to stdout, starting with the type
-        static void dump_obj(obj_t const &obj, std::string sep=" ") {
-            lg::Debug() << obj.at("type");
+        static std::ostream & dump_obj(std::ostream & os, obj_t const &obj, std::string sep=" ") {
+            os << obj.at("type");
             for(auto & p : obj)
                 if (p.first != "type")
-                    lg::Debug() << sep << p.first << "=" << p.second;
+                    os << sep << p.first << "=" << p.second;
+            return os;
         }
         // As above but specify by and prefix with object id
-        void dump_obj(uint32_t id) const {
-            lg::Debug() << id << " ";
-            dump_obj(objects.at(id), "\n  ");
-            lg::Debug();
+        std::ostream & dump_obj(std::ostream & os, uint32_t id) const {
+            os << id << " ";
+            return dump_obj(os, objects.at(id), "\n  ");
         }
         // As above, but add specified prefix
-        void dump_obj(std::string pre, uint32_t id) const {
-            lg::Debug() << pre << ": ";
-            dump_obj(id);
+        std::ostream & dump_obj(std::ostream & os, std::string pre, uint32_t id) const {
+            os << pre << ": ";
+            return dump_obj(os, id);
         }
         // Called when a new object appears in the registry, updates our local object and port structures
         void add_object(uint32_t id, obj_t obj)
         {
             std::scoped_lock l(m);
             objects[id] = obj;
-            dump_obj("Add", id);
+            dump_obj(lg::Debug(), "Add", id);
             if (is_port(obj)) {
                 bool issrc = is_src(obj);
                 port_map_t & pm = issrc ? src_port_map : dst_port_map;
@@ -307,7 +308,7 @@ class PwWrapper {
         void remove_object(uint32_t id)
         {
             std::scoped_lock l(m);
-            dump_obj("Del", id);
+            dump_obj(lg::Debug(), "Del", id);
             auto it = objects.find(id);
             if (it == objects.end()){
                 lg::Warn() << "Cannot delete object, not found " << id;
