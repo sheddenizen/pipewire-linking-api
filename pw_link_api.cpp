@@ -152,7 +152,8 @@ class PwWrapper {
         void set_desired_links(link_name_list_t const & new_desired_list) {
             std::scoped_lock l(m);
             link_name_list_t removed;
-            std::set_difference(desired_links.begin(), desired_links.end(), new_desired_list.begin(), new_desired_list.end(), std::back_inserter(removed));
+            link_name_set_t new_sorted(new_desired_list.begin(), new_desired_list.end());
+            std::set_difference(desired_links.begin(), desired_links.end(), new_sorted.begin(), new_sorted.end(), std::back_inserter(removed));
             remove_desired_links_impl(removed);
             add_desired_links_impl(new_desired_list);
             poke();
@@ -209,6 +210,7 @@ class PwWrapper {
                 if (srcidit == src_port_map.end() || dstidit == dst_port_map.end()) {
                     lg::Debug() << "Unable to unlink ports " << del.first << " and " << del.second << ", not found";
                 } else {
+                    lg::Debug() << "Adding to pending: Unlink ports " << del.first << " (" << srcidit->second << ") and " << del.second << " (" << dstidit->second << ")";
                     pending_links.push_back(std::make_tuple(srcidit->second, dstidit->second, false));
                 }
             }
@@ -224,6 +226,7 @@ class PwWrapper {
                     if (srcidit == src_port_map.end() || dstidit == dst_port_map.end()) {
                         lg::Debug() << "Unable to link ports " << p.first << " and " << p.second << ", not found";
                     } else {
+                        lg::Debug() << "Adding to pending: Link ports " << p.first << " (" << srcidit->second << ") and " << p.second << " (" << dstidit->second << ")";
                         pending_links.push_back(std::make_tuple(srcidit->second, dstidit->second, true));
                     }
                 }
@@ -288,9 +291,9 @@ class PwWrapper {
                 } else {
                     for (auto & link : desired_links) {
                         if (link.second == name) {
-                            auto it = src_port_map.find(link.second);
+                            auto it = src_port_map.find(link.first);
                             if (it != src_port_map.end()) {
-                                lg::Info() << "New dest port, " << name << " will be linked to " << link.second;
+                                lg::Info() << "New dest port, " << name << " will be linked to " << link.first;
                                 pending_links.push_back(std::make_tuple(it->second, id, true));
                             }
                         }
@@ -324,9 +327,11 @@ class PwWrapper {
                         break;
                     }
             } else if (is_link(it->second)) {
-                link_map.erase(link_key(it->second));
                 auto key = link_key(it->second);
-                link_map[key] = id;
+                if (link_map.erase(key) == 0) {
+                    lg::Warn() << "Unable to find deleted link ("<< id <<") from " << key.first << " to " << key.second << " in link map! ";
+                }
+                // link_map[key] = id;
                 auto it = desired_links.find(std::make_pair(port_name(key.first), port_name(key.second)));
                 if (it != desired_links.end()) {
                     lg::Info() << "Removed link from " << it->first << " to " << it->second << " is desired, reinstating";
@@ -432,7 +437,7 @@ class PwWrapper {
                         lg::Info() << "Removing link object " << linkit->second << " linking ports " << linkit->first.first << " and " << linkit->first.second;
                         pw_registry_destroy(registry, linkit->second);
                     } else {
-                        lg::Warn() << "Unable to find link between ports, " << linkit->first.first << " and " << linkit->first.second << ", cannot remove";
+                        lg::Warn() << "Unable to find link between ports, " << std::get<0>(link) << " and " << std::get<1>(link) << ", cannot remove";
                     }
                     pw_core_sync(core, PW_ID_CORE, 0);
                 }
@@ -451,7 +456,7 @@ class PwWrapper {
 
         void run() {
 
-lg::Debug() << "Start loop: PW Wrapper: " << this;
+            lg::Debug() << "Start loop: PW Wrapper: " << this;
 
             while (!quit) {
                 pw_main_loop_run(loop);
@@ -575,7 +580,8 @@ class Api {
         , pw(pwwrap)
     {
         auto opts = Http::Endpoint::options()
-                .threads(1);
+                .threads(1)
+                .maxRequestSize(1024*1024);
 
         httpEndpoint.init(opts);
         set_routes();
@@ -634,6 +640,8 @@ class Api {
 
     Route::Result active_links_get(const Request& request, Http::ResponseWriter response) {
         auto links = pw.get_active_links();
+        lg::Debug() << "Get active links: " << links.size() << " pairs";
+
         json::Document d;
         d.SetArray();
 
@@ -667,7 +675,7 @@ class Api {
         json::Document d;
         bool result = false;
         d.Parse(request.body().c_str());
-        lg::Debug() << "Got doc: " << jsonify(d);
+        lg::Debug() << "Modify desired links doc: " << jsonify(d);
         if (d.IsArray()) {
             PwWrapper::link_name_list_t list_in;
             for (auto l = d.Begin() ; l != d.End() ; ++l) {
@@ -689,12 +697,15 @@ class Api {
     }
 
     Route::Result desired_links_set(const Request& request, Http::ResponseWriter response) {
+        lg::Debug() << "Set desired links";
         return desired_links_modify(request, response, &PwWrapper::set_desired_links);
     }
     Route::Result desired_links_add(const Request& request, Http::ResponseWriter response) {
+        lg::Debug() << "Add desired links";
         return desired_links_modify(request, response, &PwWrapper::add_desired_links);
     }
     Route::Result desired_links_remove(const Request& request, Http::ResponseWriter response) {
+        lg::Debug() << "Remove desired links";
         return desired_links_modify(request, response, &PwWrapper::remove_desired_links);
     }
 
