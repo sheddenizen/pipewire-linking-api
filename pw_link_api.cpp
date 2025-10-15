@@ -243,7 +243,16 @@ class PwWrapper {
         std::string port_name(obj_t const &obj) const {
             uint32_t node_idx = std::stoul(obj.at("node.id"));
             std::string node_name = objects.at(node_idx).at("node.name");
-            return  node_name + ':' + obj.at("port.name");
+            if (node_name.find("netjack2_manager_") == 0) {
+                // The first of no doubt many annoying exceptions
+                std::string result=obj.at("port.alias");
+                for (auto & c : result)
+                    c = (c==' ') ? '_' : c;
+                return result;
+            } else {
+                // Default scheme works better at distinguishing multiple instances of the same type of client
+                return node_name + ':' + obj.at("port.name");
+            }
         }
         // Same but start with the object index
         std::string port_name(uint32_t obj_id) const { return port_name(objects.at(obj_id)); }
@@ -721,7 +730,7 @@ int main(int argc, char *argv[])
     signal(SIGTERM, handle_sig);
     signal(SIGHUP, handle_sig);
     PwWrapper pww;
-    usleep(100000);
+    usleep(200000);
     pww.show_ports();
     Api api(pww, 9080);
     quit = std::bind(&Api::clear_and_stop, &api);
