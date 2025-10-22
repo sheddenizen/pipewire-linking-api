@@ -365,11 +365,19 @@ class PwWrapper {
                 lg::Error() << "Cannot make link: link_proxy already allocated! (" << link_proxy << ")";
                 return false;
             }
+            // It seems pw will not only recycle object ids, but happily replace them with completely different
+            // types of object, hence we need to apply paranoia here as well. ToDo: Need to look up objs later in the process
+            auto srcnodeit = srcit->second.find("node.id");
+            auto dstnodeit = dstit->second.find("node.id");
+            if (srcnodeit == srcit->second.end() || dstnodeit == dstit->second.end()) {
+                lg::Warn() << "Unable to link ports " << src << " and " << dst << ", unable to get parent node ids";
+                return false;
+            }
 
             struct pw_properties *props = pw_properties_new(
-                PW_KEY_LINK_OUTPUT_NODE, srcit->second.at("node.id"),
+                PW_KEY_LINK_OUTPUT_NODE, *srcnodeit,
                 PW_KEY_LINK_OUTPUT_PORT, std::to_string(src).c_str(),
-                PW_KEY_LINK_INPUT_NODE, dstit->second.at("node.id"),
+                PW_KEY_LINK_INPUT_NODE, *dstnodeit,
                 PW_KEY_LINK_INPUT_PORT, std::to_string(dst).c_str(),
                 PW_KEY_OBJECT_LINGER, "true",
                 NULL);
